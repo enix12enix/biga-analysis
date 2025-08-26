@@ -13,7 +13,7 @@ fn to_sina_code(code: &str) -> String {
     format!("{}{}", prefix, code)
 }
 
-async fn fetch_etf_kline(code: &str, day: usize) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+async fn fetch_etf_kline(code: &str, day: usize) -> Result<(Vec<f64>, Option<u16>), Box<dyn std::error::Error>> {
     let sina_code = to_sina_code(code);
     let url = format!(
         "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={}&scale=240&ma=no&datalen={}",
@@ -21,17 +21,33 @@ async fn fetch_etf_kline(code: &str, day: usize) -> Result<Vec<f64>, Box<dyn std
     );
 
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await?.text().await?;
-
-    let data: Vec<SinaKLine> = serde_json::from_str(&resp)?;
-
-    let mut closes = Vec::new();
-    for item in data {
-        let close: f64 = item.close.parse().map_err(|_| "parse close error")?;
-        closes.push(close);
+    let response = client.get(&url).send().await;
+    
+    match response {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let text = resp.text().await?;
+            
+            match serde_json::from_str::<Vec<SinaKLine>>(&text) {
+                Ok(data) => {
+                    let mut closes = Vec::new();
+                    for item in data {
+                        match item.close.parse::<f64>() {
+                            Ok(close) => closes.push(close),
+                            Err(_) => return Ok((Vec::new(), Some(status))),
+                        }
+                    }
+                    Ok((closes, Some(status)))
+                }
+                Err(_) => {
+                    Ok((Vec::new(), Some(status)))
+                }
+            }
+        }
+        Err(e) => {
+            Err(Box::new(e))
+        }
     }
-
-    Ok(closes)
 }
 
 #[allow(dead_code)]
@@ -45,9 +61,9 @@ struct SinaKLine {
     day: String,
 }
 
-fn calculate_downrate(older: f64, newer: f64) -> f64 {
+fn calculate(older: f64, newer: f64) -> f64 {
     if older > 0.0 {
-        (older - newer) / older * 100.0
+        (newer - older) / older * 100.0
     } else {
         0.0
     }
@@ -66,21 +82,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for &code in ETF_CODES {
         match fetch_etf_kline(code, day).await {
-            Ok(prices) => {
+            Ok((prices, status_option)) => {
+                if let Some(status) = status_option {
+                    if status != 200 {
+                        eprintln!("HTTP {} for code: {}", status, code);
+                        continue;
+                    }
+                }
+
                 if prices.len() >= day {
                     let price_pre = prices[0];
                     let price_today = prices[day - 1];
 
                     if price_today < price_pre {
-                        let downrate = calculate_downrate(price_pre, price_today);
-                        results.push((code, downrate));
+                        let today_decline_rate = calculate(price_pre, price_today);
+
+                        let half_day_idx = if day > 1 { day / 2 } else { 0 };
+                        let half_day_decline_rate = if half_day_idx < prices.len() && day > 1 {
+                            let price_half = prices[day - 1 - half_day_idx];
+                            calculate(price_pre, price_half)
+                        } else {
+                            0.0
+                        };
+                        results.push((code, today_decline_rate, half_day_decline_rate));
                     }
                 } else {
                     eprintln!("Not enough data for {}: got {} days", code, prices.len());
                 }
             }
             Err(e) => {
-                eprintln!("Failed to fetch data for {}: {}", code, e);
+                eprintln!("Failed to fetch data for {}: {} (No HTTP status available)", code, e);
             }
         }
     }
@@ -88,11 +119,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n ETF Decline over {} days:", day);
     println!("-----------------------------------------");
     if results.is_empty() {
-        println!("No declined ETF");
+        println!("No ETF data");
     } else {
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        for (code, rate) in results {
-            println!("Code: {} Decline: -{:.2}%", code, rate);
+        let hald_day = day / 2;
+        results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        for (code, rate, new_rate) in results {
+            println!(
+                "Code: {} | Rate(Today/{} days ago): {:.2}% | Rate({} days ago/{} days ago): {:.2}%",
+                code, day, rate, hald_day, day, new_rate
+            );
         }
     }
 
