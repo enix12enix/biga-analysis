@@ -27,6 +27,7 @@ class GridStrategy(bt.Strategy):
         self.buy_count = 0
         self.sell_count = 0
         self.initial_cash = None
+        self.max_capital_used = 0
 
     def log_trade(self, action, price, size):
         # the transaction detail
@@ -57,6 +58,8 @@ class GridStrategy(bt.Strategy):
             self.last_buy_price = price
             self.buy_count += 1
             self.log_trade("BUY INIT", price, size)
+            current_capital_used = self.units_bought * self.params.unit_cash
+            self.max_capital_used = max(self.max_capital_used, current_capital_used)
             return
 
         # determine whether sell
@@ -93,12 +96,16 @@ class GridStrategy(bt.Strategy):
             self.last_buy_price = price
             self.buy_count += 1
             self.log_trade("BUY", price, size)
+            current_capital_used = self.units_bought * self.params.unit_cash
+            self.max_capital_used = max(self.max_capital_used, current_capital_used)
 
     def stop(self):
         self.buy_count = 0 if self.sell_count == 0 else self.buy_count
         final_value = self.broker.get_value()
         profit = final_value - self.initial_cash
         profit_pct = (profit / self.initial_cash) * 100
+        capital_usage_pct = (self.max_capital_used / self.initial_cash) * 100 if self.initial_cash else 0
+
 
         trimmed_trades = self.trades[:]
         trimmed_buy_count = self.buy_count
@@ -135,6 +142,7 @@ class GridStrategy(bt.Strategy):
             "profit_pct": round(profit_pct, 2),
             "buy_count": trimmed_buy_count,
             "sell_count": trimmed_sell_count,
+            "capital_usage_pct": round(capital_usage_pct, 2), 
             "trades": trimmed_trades
         }
         json_str = json.dumps(result, ensure_ascii=False, indent=2)
