@@ -59,7 +59,7 @@ class GridStrategy(bt.Strategy):
             self.log_trade("BUY INIT", price, size)
             return
 
-        # determine whether sell
+        # determine wheter sell
         if self.units_bought > 0 and price >= self.last_buy_price * (1 + self.params.grid_up_pct):
             size = int(self.params.unit_cash / price)
             self.sell(size=size)
@@ -69,14 +69,18 @@ class GridStrategy(bt.Strategy):
             self.sell_count += 1
             self.log_trade("SELL", price, size)
 
-        # calculate buy price
+        # determine wheter buy
         reference_price = None
-        if self.params.buy_strategy == "by_latest_sell" and self.last_sell_price:
-            reference_price = self.last_sell_price
+        if self.params.buy_strategy == "by_latest_sell":
+            if self.trades:
+                reference_price = self.trades[-1]["price"]
+            elif self.last_sell_price:
+                reference_price = self.last_sell_price
+            elif self.last_buy_price:
+                reference_price = self.last_buy_price
         elif self.params.buy_strategy == "by_latest_buy" and self.last_buy_price:
             reference_price = self.last_buy_price
 
-        # determine whether buy
         if (
             reference_price
             and self.units_bought < self.params.total_units
@@ -96,33 +100,54 @@ class GridStrategy(bt.Strategy):
         profit = final_value - self.initial_cash
         profit_pct = (profit / self.initial_cash) * 100
 
-        # json result for grid regression
-        # sample response
-        # { "initial_cash": 100000.0, "final_value": 116606.88, "profit": 16606.88, "profit_pct": 16.61, "buy_count": 1, "sell_count": 1, "trades": [ { "date": "2024-01-02", "action": "BUY INIT", "price": 1.316, "size": 7598, "cash": 100000.0, "value": 100000.0 }, { "date": "2024-01-09", "action": "SELL", "price": 1.37, "size": 7299, "cash": 90023.83, "value": 100433.09 } ] }
+        trimmed_trades = self.trades[:]
+        trimmed_buy_count = self.buy_count
+        trimmed_sell_count = self.sell_count
+
+        # Remove the trades until the last one is sell
+        while trimmed_trades and trimmed_trades[-1]["action"] != "SELL":
+            last_trade = trimmed_trades.pop()
+            if last_trade["action"].startswith("BUY"):
+                trimmed_buy_count -= 1
+            elif last_trade["action"] == "SELL":
+                trimmed_sell_count -= 1
+
+        # recalcuate final_value 和 profit
+        if trimmed_trades and trimmed_trades[-1]["action"] == "SELL":
+            final_value = trimmed_trades[-1]["value"]
+            profit = final_value - self.initial_cash
+            profit_pct = (profit / self.initial_cash) * 100
+        else:
+            final_value = self.initial_cash
+            profit = 0.0
+            profit_pct = 0.0
+            trimmed_buy_count = 0
+            trimmed_sell_count = 0
+            trimmed_trades = []
+
         result = {
             "initial_cash": round(self.initial_cash, 2),
-            "final_value": round(self.initial_cash, 2) if self.sell_count == 0 else round(final_value, 2) ,
-            "profit": 0.0 if self.sell_count == 0 else round(profit, 2),
-            "profit_pct": 0.0 if self.sell_count == 0 else round(profit_pct, 2),
-            "buy_count": 0 if self.sell_count == 0 else self.buy_count,
-            "sell_count": self.sell_count,
-            # the details of each transactions.
-            "trades": [] if self.sell_count == 0 else self.trades
+            "final_value": round(final_value, 2),
+            "profit": round(profit, 2),
+            "profit_pct": round(profit_pct, 2),
+            "buy_count": trimmed_buy_count,
+            "sell_count": trimmed_sell_count,
+            "trades": trimmed_trades
         }
         json_str = json.dumps(result, ensure_ascii=False, indent=2)
 
-        # Print transaction details if json_only is not set on command line
+        # print transaction details if json_only is not set on command line
         if not self.params.json_only:
             print("\n===== 交易明细 =====")
-            for t in self.trades:
+            for t in trimmed_trades:
                 print(f"{t['date']} {t['action']}: {t['price']} x {t['size']}股  "
-                      f"资金={t['cash']:.2f}  总资产={t['value']:.2f}")
+                    f"资金={t['cash']:.2f}  总资产={t['value']:.2f}")
 
             print("\n===== 统计结果 =====")
-            print("总买入次数: %s", result["buy_count"])
-            print(f"总卖出次数: {self.sell_count}")
-            print("最终收益: %s 元", result["profit"])
-            print("收益率: %s", result["profit_pct"])
+            print(f"总买入次数: {trimmed_buy_count}")
+            print(f"总卖出次数: {trimmed_sell_count}")
+            print(f"最终收益: {profit:.2f} 元")
+            print(f"收益率: {profit_pct:.2f}%")
 
         print("\n===== JSON 结果 =====")
         print(json_str)
