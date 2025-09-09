@@ -131,8 +131,27 @@ class GridStrategy(bt.Strategy):
             print(f"JSON 结果已导出到: {self.params.json_output}")
 
 
-def get_etf_data(symbol, start_date=None, end_date=None):
-    df = ak.fund_etf_hist_sina(symbol=symbol)
+def get_stock_data(symbol, start_date=None, end_date=None, cached=False):
+    symbol = "sh" + symbol if symbol[0] == "5" else "sz" + symbol
+    if cached:
+        import pickle
+        from datetime import datetime
+        # Create filename with current date
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        pickle_filename = f"{symbol}_{current_date}.pkl"
+        
+        try:
+            with open(pickle_filename, 'rb') as f:
+                df = pickle.load(f)
+        except FileNotFoundError:
+            df = ak.fund_etf_hist_sina(symbol=symbol)
+            with open(pickle_filename, 'wb') as f:
+                pickle.dump(df, f)
+        except Exception:
+            df = ak.fund_etf_hist_sina(symbol=symbol)
+    else:
+        df = ak.fund_etf_hist_sina(symbol=symbol)
+    
     df["date"] = pd.to_datetime(df["date"])
     if start_date:
         df = df[df["date"] >= pd.to_datetime(start_date)]
@@ -146,12 +165,12 @@ def get_etf_data(symbol, start_date=None, end_date=None):
 
 
 
-# python grid.py --symbol sh513520 --start_date 2024-01-01 --end_date 2025-09-09 --grid_up_pct 0.02 --grid_down_pct 0.02 --unit_cash 10000 --total_units 10 --buy_strategy by_latest_sell --json_only --json_output backtest_result.json
-# python grid.py --symbol sh513520 --start_date 2024-01-01 --end_date 2025-09-09 --grid_up_pct 0.02 --grid_down_pct 0.02 --unit_cash 10000 --total_units 10 --buy_strategy by_latest_sell
+# python grid.py --symbol 513520 --start_date 2024-01-01 --end_date 2025-09-09 --grid_up_pct 0.02 --grid_down_pct 0.02 --unit_cash 10000 --total_units 10 --buy_strategy by_latest_sell --json_only --json_output backtest_result.json
+# python grid.py --symbol 513520 --start_date 2024-01-01 --end_date 2025-09-09 --grid_up_pct 0.02 --grid_down_pct 0.02 --unit_cash 10000 --total_units 10 --buy_strategy by_latest_sell
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--symbol", default="sh513520", help="ETF代码")
+    parser.add_argument("--symbol", default="513520", help="ETF代码")
     parser.add_argument("--start_date", help="开始日期 (YYYY-MM-DD)")
     parser.add_argument("--end_date", help="结束日期 (YYYY-MM-DD)")
     parser.add_argument("--grid_up_pct", type=float, default=0.02, help="网格卖出涨幅")
@@ -162,9 +181,10 @@ if __name__ == "__main__":
                         default="by_latest_buy", help="买入策略参考价格")
     parser.add_argument("--json_only", action="store_true", help="只输出 JSON，不打印交易明细")
     parser.add_argument("--json_output", help="导出 JSON 文件名（可选）")
+    parser.add_argument("--data_cached", action= "store_true", help="cache stock data")
     args = parser.parse_args()
 
-    df = get_etf_data(args.symbol, args.start_date, args.end_date)
+    df = get_stock_data(args.symbol, args.start_date, args.end_date, args.data_cached)
 
     cerebro = bt.Cerebro()
     cerebro.broker.set_cash(args.unit_cash * args.total_units)
