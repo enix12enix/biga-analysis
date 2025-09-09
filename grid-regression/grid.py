@@ -59,7 +59,7 @@ class GridStrategy(bt.Strategy):
             self.log_trade("BUY INIT", price, size)
             return
 
-        # determine wheter sell
+        # determine whether sell
         if self.units_bought > 0 and price >= self.last_buy_price * (1 + self.params.grid_up_pct):
             size = int(self.params.unit_cash / price)
             self.sell(size=size)
@@ -69,7 +69,7 @@ class GridStrategy(bt.Strategy):
             self.sell_count += 1
             self.log_trade("SELL", price, size)
 
-        # determine wheter buy
+        # determine whether buy
         reference_price = None
         if self.params.buy_strategy == "by_latest_sell":
             if self.trades:
@@ -125,6 +125,9 @@ class GridStrategy(bt.Strategy):
             trimmed_sell_count = 0
             trimmed_trades = []
 
+        # json result for grid regression
+        # sample response
+        # { "initial_cash": 100000.0, "final_value": 116606.88, "profit": 16606.88, "profit_pct": 16.61, "buy_count": 1, "sell_count": 1, "trades": [ { "date": "2024-01-02", "action": "BUY INIT", "price": 1.316, "size": 7598, "cash": 100000.0, "value": 100000.0 }, { "date": "2024-01-09", "action": "SELL", "price": 1.37, "size": 7299, "cash": 90023.83, "value": 100433.09 } ] }
         result = {
             "initial_cash": round(self.initial_cash, 2),
             "final_value": round(final_value, 2),
