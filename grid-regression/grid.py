@@ -3,6 +3,9 @@ import akshare as ak
 import argparse
 import pandas as pd
 import json
+import pickle
+import os
+from datetime import datetime
 
 
 class GridStrategy(bt.Strategy):
@@ -133,12 +136,16 @@ class GridStrategy(bt.Strategy):
 
 def get_stock_data(symbol, start_date=None, end_date=None, cached=False):
     symbol = "sh" + symbol if symbol[0] == "5" else "sz" + symbol
+
     if cached:
         import pickle
         from datetime import datetime
-        # Create filename with current date
+
+        # pickle file name
         current_date = datetime.now().strftime("%Y-%m-%d")
-        pickle_filename = f"{symbol}_{current_date}.pkl"
+        stock_data_dir = os.environ.get('STOCK_DATA_DIR', '.')
+        os.makedirs(stock_data_dir, exist_ok=True)
+        pickle_filename = os.path.join(stock_data_dir, f"{symbol}_{current_date}.pkl")
         
         try:
             with open(pickle_filename, 'rb') as f:
